@@ -1,6 +1,5 @@
 import os
 import logging
-import time
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -43,7 +42,6 @@ def get_engine():
         vector_store = PineconeVectorStore(pinecone_index=pinecone_index)
         index = VectorStoreIndex.from_vector_store(vector_store=vector_store)
         
-        # Reduced top_n to 3 to save memory/speed on free tier
         reranker = CohereRerank(api_key=os.environ.get("COHERE_API_KEY"), top_n=3)
         
         query_engine = index.as_query_engine(
@@ -53,8 +51,13 @@ def get_engine():
         logger.info("Brain initialized and ready.")
     return query_engine
 
+# --- THE FIX: Accept any common input name ---
 class QueryRequest(BaseModel):
-    query: str
+    query: str | None = None
+    message: str | None = None
+    prompt: str | None = None
+    question: str | None = None
+# ---------------------------------------------
 
 @app.head("/")
 def handle_head():
@@ -62,15 +65,13 @@ def handle_head():
 
 @app.get("/")
 def read_root():
-    # If you see this message, you know the new code is live
-    return {"status": "online", "message": "O.S.C.A.R. V3 Warmup Edition"}
+    return {"status": "online", "message": "O.S.C.A.R. V4 Universal Edition"}
 
 @app.get("/warmup")
 def warmup_brain():
     try:
-        # Force the engine to load
         get_engine()
-        return {"status": "ready", "message": "Brain is loaded. You can now chat."}
+        return {"status": "ready", "message": "Brain is loaded."}
     except Exception as e:
         logger.error(f"Warmup Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -78,9 +79,15 @@ def warmup_brain():
 @app.post("/query")
 async def run_query(request: QueryRequest):
     try:
+        # Detect which field has the text
+        user_input = request.query or request.message or request.prompt or request.question
+        
+        if not user_input:
+            raise HTTPException(status_code=422, detail="No query found in request body")
+
         engine = get_engine()
-        logger.info(f"Query received: {request.query}")
-        response = engine.query(request.query)
+        logger.info(f"Query received: {user_input}")
+        response = engine.query(user_input)
         return {"response": str(response)}
     except Exception as e:
         logger.error(f"Engine Error: {str(e)}")
